@@ -39,7 +39,7 @@ if [ "$ACTION" = "add" ]; then
         exit 0
     fi
 
-    if [ -z "${UUID}" ] || [ -z "${TYPE}" ]; then
+    if [ -z "${LABEL}" ] && [ -z "${UUID}" ]; then
         exit 1
     fi
 
@@ -59,8 +59,28 @@ if [ "$ACTION" = "add" ]; then
     esac
     fsck $FSCK_OPTS ${DEVNAME}
 
-    test -d $MNT/${UUID} || mkdir -p $MNT/${UUID}
-    chown $DEF_UID:$DEF_GID $MNT $MNT/${UUID}
+	if [ "x${LABEL}" != "x" ]; then
+        MNT_DIR="$MNT/${LABEL}"
+		TMPNAME=$(grep -w ${MNT_DIR} /proc/mounts | cut -d \  -f 1)
+        if [ -n "$TMPNAME" ]; then
+            systemd-cat -t mount-sd /bin/echo "${TMPNAME} already mounted on ${MNT_DIR}, falling back to UUID"
+            MNT_DIR="$MNT/${UUID}"
+            TMPNAME=$(grep -w ${MNT_DIR} /proc/mounts | cut -d \  -f 1)
+            if [ -n "$TMPNAME" ]; then
+                systemd-cat -t mount-sd /bin/echo "${TMPNAME} already mounted on ${MNT_DIR}, ignoring"
+                exit 0
+            fi
+        fi
+    else
+        MNT_DIR="$MNT/${UUID}"
+		TMPNAME=$(grep -w ${MNT_DIR} /proc/mounts | cut -d \  -f 1)
+        if [ -n "$TMPNAME" ]; then
+            systemd-cat -t mount-sd /bin/echo "${TMPNAME} already mounted on ${MNT_DIR}, ignoring"
+            exit 0
+        fi
+    fi
+    test -d $MNT_DIR || mkdir -p $MNT_DIR
+    chown $DEF_UID:$DEF_GID $MNT $MNT_DIR
 
     case "${TYPE}" in
         vfat)
@@ -78,7 +98,7 @@ if [ "$ACTION" = "add" ]; then
             MOUNT_OPTS+=",discard"
             ;;
     esac
-    mount ${DEVNAME} $MNT/${UUID} -o $MOUNT_OPTS || /bin/rmdir $MNT/${UUID}
+    mount ${DEVNAME} $MNT_DIR -o $MOUNT_OPTS || /bin/rmdir $MNT_DIR
 
     # This hack is here to delay indexing till the tracker has started.
     export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$DEF_UID/dbus/user_bus_socket
@@ -92,9 +112,9 @@ if [ "$ACTION" = "add" ]; then
         sleep $count ; 
         count=$(( count + count ))
     done
-    test -d $MNT/${UUID} && touch $MNT/${UUID}
+    test -d $MNT_DIR && touch $MNT_DIR
 
-    systemd-cat -t mount-sd /bin/echo "Finished ${ACTION}ing ${DEVNAME} of type ${TYPE} at $MNT/${UUID}"
+    systemd-cat -t mount-sd /bin/echo "Finished ${ACTION}ing ${DEVNAME} of type ${TYPE} at $MNT_DIR"
 
 else
     DIR=$(grep -w ${DEVNAME} /proc/mounts | cut -d \  -f 2)
@@ -105,7 +125,7 @@ else
         fi
         umount $DIR || umount -l $DIR
         touch ${DIR} # Tell the tracker to reindex.
-        rmdir ${DIR} # Remove the temporary mount directory.
+        rmdir ${DIR} || systemd-cat -t mount-sd /bin/echo "Warning: Can't remove directory ${DIR}" # Remove the temporary mount directory.
         systemd-cat -t mount-sd /bin/echo "Finished ${ACTION}ing ${DEVNAME} at ${DIR}"
     else
         SWAP=$(grep -w ${DEVNAME} /proc/swaps | cut -d \  -f 1)
