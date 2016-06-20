@@ -3,6 +3,8 @@
 # The only case where this script would fail is:
 # mkfs.vfat /dev/mmcblk1 then repartitioning to create an empty ext2 partition
 
+. /etc/sailfish-release
+
 DEF_UID=$(grep "^UID_MIN" /etc/login.defs |  tr -s " " | cut -d " " -f2)
 DEF_GID=$(grep "^GID_MIN" /etc/login.defs |  tr -s " " | cut -d " " -f2)
 DEVICEUSER=$(getent passwd $DEF_UID | sed 's/:.*//')
@@ -27,7 +29,20 @@ if [ "$ACTION" = "add" ]; then
         exit 1
     fi
 
-    if [ "${TYPE}" = "swap" ]; then
+    NATIVE_SWAP=( 2 0 2 45 )
+    IFS="."
+    i=0;
+    NEED_SWAP=false;
+    for VNUMBER in ${VERSION_ID} ; do
+        test ${VNUMBER} -gt ${NATIVE_SWAP[i]} && break;
+        if [ ${VNUMBER} -lt ${NATIVE_SWAP[i]} ]; then
+            NEED_SWAP=true;
+            break;
+        fi
+        i=$i+1;
+    done
+
+    if [ ${NEED_SWAP} = true -a "${TYPE}" = "swap" ]; then
         SWAP=$(grep -w ${DEVNAME} /proc/swaps | cut -d \  -f 1)
         if [ -n "$SWAP" ]; then
             systemd-cat -t mount-sd /bin/echo "${DEVNAME} already used as swap space, ignoring"
